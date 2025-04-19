@@ -70,6 +70,7 @@ import (
 	"github.com/mattermost/mattermost/server/v8/platform/services/awsmeter"
 	"github.com/mattermost/mattermost/server/v8/platform/services/cache"
 	"github.com/mattermost/mattermost/server/v8/platform/services/remotecluster"
+	"github.com/mattermost/mattermost/server/v8/platform/services/searchengine"
 	"github.com/mattermost/mattermost/server/v8/platform/services/searchengine/bleveengine"
 	"github.com/mattermost/mattermost/server/v8/platform/services/searchengine/bleveengine/indexer"
 	"github.com/mattermost/mattermost/server/v8/platform/services/sharedchannel"
@@ -78,6 +79,7 @@ import (
 	"github.com/mattermost/mattermost/server/v8/platform/shared/filestore"
 	"github.com/mattermost/mattermost/server/v8/platform/shared/mail"
 	"github.com/mattermost/mattermost/server/v8/platform/shared/templates"
+	"github.com/mattermost/mattermost/server/v8/platform/services/elasticsearch"
 )
 
 const (
@@ -153,6 +155,8 @@ type Server struct {
 	OutgoingOAuthConnection einterfaces.OutgoingOAuthConnectionInterface
 
 	ch *Channels
+
+	elasticsearchService *elasticsearch.Service
 }
 
 func (s *Server) Store() store.Store {
@@ -1097,6 +1101,22 @@ func (s *Server) Start() error {
 		mlog.Error("Error starting inter-cluster services", mlog.Err(err))
 	}
 
+	// Register Elasticsearch search engine adapter and initialize API
+	if s.elasticsearchService != nil && s.elasticsearchService.IsActive() {
+		// Register the search engine adapter
+		searchEngine := s.platform.SearchEngine
+		if searchEngine != nil {
+			adapter := elasticsearch.NewSearchAdapter(s.elasticsearchService)
+			searchEngine.RegisterElasticsearchEngine(adapter)
+			s.Log().Info("Elasticsearch search engine registered")
+		}
+
+		// Initialize the Elasticsearch API
+		esAPI := &elasticsearch.API{}
+		esAPI.Init(s.Router, s.elasticsearchService)
+		s.Log().Info("Elasticsearch API initialized")
+	}
+
 	return nil
 }
 
@@ -1869,4 +1889,52 @@ func (s *Server) Log() *mlog.Logger {
 
 func (s *Server) NotificationsLog() *mlog.Logger {
 	return s.platform.NotificationsLogger()
+}
+
+// ElasticsearchService returns the elasticsearch service
+func (s *Server) ElasticsearchService() *elasticsearch.Service {
+	return s.elasticsearchService
+}
+
+// CreateSearchEngine registers the Elasticsearch search engine if enabled
+func (s *Server) CreateSearchEngine() *searchengine.Broker {
+	// Register the Elasticsearch search engine if enabled
+	if s.elasticsearchService != nil && s.elasticsearchService.IsActive() {
+		searchEngine.RegisterElasticsearchEngine(func(b *searchengine.Broker) searchengine.SearchEngineInterface {
+			return elasticsearch.NewSearchAdapter(s.elasticsearchService)
+		})
+	}
+
+	// return statement and other code ...
+	return nil
+}
+
+// initServer initializes the Elasticsearch service
+func (s *Server) initServer() error {
+	// Initialize the Elasticsearch service
+	esService, err := elasticsearch.New(s.platform.Config(), s.Log())
+	if err != nil {
+		s.Log().Error("Failed to initialize Elasticsearch service", mlog.Err(err))
+	} else {
+		s.elasticsearchService = esService
+		s.Log().Info("Elasticsearch service initialized")
+	}
+
+	// ... other code ...
+	return nil
+}
+
+// startSearchEngine refreshes Elasticsearch indexes
+func (s *Server) startSearchEngine() {
+	// Add this near the end
+	if s.elasticsearchService != nil && s.elasticsearchService.IsActive() {
+		if err := s.elasticsearchService.RefreshIndex(); err != nil {
+			s.Log().Error("Failed to refresh Elasticsearch indexes", mlog.Err(err))
+		}
+	}
+}
+
+// stopSearchEngine ensures Elasticsearch is properly cleaned up
+func (s *Server) stopSearchEngine() {
+	// Nothing to stop for Elasticsearch currently
 }
