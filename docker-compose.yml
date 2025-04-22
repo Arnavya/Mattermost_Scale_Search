@@ -1,0 +1,73 @@
+version: '3'
+
+services:
+  mysql:
+    image: mysql/mysql-server:8.0.32
+    container_name: mattermost-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=mostest
+      - MYSQL_USER=mmuser
+      - MYSQL_PASSWORD=mostest
+      - MYSQL_DATABASE=mattermost_test
+    command: ["mysqld", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--skip-character-set-client-handshake", "--skip-host-cache", "--skip-name-resolve"]
+    restart: unless-stopped
+    networks:
+      - mattermost
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pmostest"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  elasticsearch:
+    image: mattermostdevelopment/mattermost-elasticsearch:8.9.0
+    container_name: mattermost-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    restart: unless-stopped
+    networks:
+      - mattermost
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mattermost:
+    image: mattermost/mattermost-team-edition:latest
+    container_name: mattermost
+    depends_on:
+      mysql:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - mattermost
+    volumes:
+      - ./config.json:/mattermost/config/config.json
+      - mattermost-data:/mattermost/data
+      - mattermost-logs:/mattermost/logs
+      - mattermost-plugins:/mattermost/plugins
+      - mattermost-client-plugins:/mattermost/client/plugins
+    ports:
+      - "8065:8065"
+    environment:
+      - MM_SQLSETTINGS_DRIVERNAME=mysql
+      - MM_SQLSETTINGS_DATASOURCE=mmuser:mostest@tcp(mysql:3306)/mattermost_test?charset=utf8mb4,utf8&readTimeout=30s&writeTimeout=30s
+      - MM_ELASTICSEARCHSETTINGS_CONNECTIONURL=http://elasticsearch:9200
+    restart: unless-stopped
+
+networks:
+  mattermost:
+
+volumes:
+  mattermost-data:
+  mattermost-logs:
+  mattermost-plugins:
+  mattermost-client-plugins: 
